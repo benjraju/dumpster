@@ -1,17 +1,37 @@
-# hi, this is freewrite
+# Dumpster Note 🗑️📝
 
-a simple, open-source mac app to freewrite.
+Welcome to Dumpster Note – a simple space to dump your thoughts and notes on macOS and iOS.
 
-download latest version [here](https://www.freewrite.io/)
+Built with SwiftUI, Dumpster Note offers a clean writing environment with features to help you capture and reflect on your ideas.
 
-![img](https://i.imgur.com/2ucbtff.gif)
+## Features
 
-if you wanna make an addition + pr,
-or just wanna remix the app for yourself go for it.
+*   **Text Editor:** A straightforward editor for writing your notes and entries.
+*   **Entry Management:**
+    *   Save your current writing session as an entry.
+    *   Browse, load, and delete previous entries through the History view.
+*   **Customization:**
+    *   Select your preferred font (includes Lato, Arial, Times New Roman, Georgia, and system defaults).
+    *   Adjust the font size (16pt to 26pt).
+    *   Toggle between Light and Dark color schemes.
+*   **Word Count:** See a live word count as you type.
+*   **AI Integration:**
+    *   **Guiding Questions:** Tap "AI Dive Deeper" (iOS) for context-aware prompts to help explore your current writing.
+    *   **Entry Analysis:** Option to trigger a more detailed AI analysis of a saved entry (macOS & iOS sheet).
+*   **Mood Selection:** Start new entries by choosing a mood, potentially guiding your writing focus.
+*   **Platform Support:** Designed for both macOS and iOS.
 
-- clone repo.
-- open in xcode.
-- click build.
-- done -- you're up and running.
+## Getting Started (Development)
 
-make changes on a pr and i'll run on my end and then build a new version :).
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/benjraju/dumpster.git
+    ```
+2.  **Open in Xcode:**
+    Navigate to the cloned directory and open `freewrite/freewrite.xcodeproj`.
+    *(Note: The project files might still be named 'freewrite' until a full project rename is done)*
+3.  **Build and Run:**
+    Select the desired target (macOS or iOS) and run the application using the ▶ button in Xcode.
+
+## Future Ideas
+(Add potential future features or improvements here)
