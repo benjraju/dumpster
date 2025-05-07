@@ -10,7 +10,7 @@ struct BottomNavView: View {
     @Binding var selectedFont: String
     @Binding var timeRemaining: Int
     @Binding var timerIsRunning: Bool
-    @Binding var colorScheme: ColorScheme
+    @Binding var colorSchemeString: String // MODIFIED from colorScheme
     @Binding var initiateAICall: Bool // Trigger for AI
     @Binding var isFullscreen: Bool // Only if needed directly by this view
     @Binding var activeSheet: ActiveSheet?
@@ -35,6 +35,12 @@ struct BottomNavView: View {
     let fontSizes: [CGFloat] = [16, 18, 20, 22, 24, 26] // Example
     let availableFonts = NSFontManager.shared.availableFontFamilies // Example
     
+    // Helper to determine if the current theme is light-based for more complex conditional logic if needed
+    // For simple text/icon colors, BrandColors should be used directly.
+    private var isLightBasedTheme: Bool {
+        return colorSchemeString == "light" || colorSchemeString == "sepia" || colorSchemeString == "dracula_lite"
+    }
+
     // Computed properties moved/adapted from ContentView
     var fontSizeButtonTitle: String { "\(Int(fontSize))px" }
     var randomButtonTitle: String { "Random" } // Simplified for now
@@ -44,16 +50,16 @@ struct BottomNavView: View {
         let seconds = timeRemaining % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-    var timerColor: Color { /* ... copy logic from ContentView ... */
+    var timerColor: Color {
          if timerIsRunning {
-            return isHoveringTimer ? (colorScheme == .light ? .black : .white) : .gray.opacity(0.8)
+            return isHoveringTimer ? BrandColors.primaryText(for: colorSchemeString) : BrandColors.secondaryText(for: colorSchemeString)
         } else {
-            return isHoveringTimer ? (colorScheme == .light ? .black : .white) : (colorScheme == .light ? .gray : .gray.opacity(0.8))
+            return isHoveringTimer ? BrandColors.primaryText(for: colorSchemeString) : BrandColors.secondaryText(for: colorSchemeString)
         }
     }
-    // Use standard adaptive colors
-    var textColor: Color { Color.secondary } // Standard secondary color for less emphasis
-    var textHoverColor: Color { Color.primary } // Standard primary color for emphasis
+    var textColor: Color { BrandColors.secondaryText(for: colorSchemeString) } 
+    var textHoverColor: Color { BrandColors.primaryText(for: colorSchemeString) } 
+    var dividerColor: Color { BrandColors.secondaryText(for: colorSchemeString).opacity(0.5) }
     
     var body: some View {
         HStack {
@@ -86,13 +92,16 @@ struct BottomNavView: View {
                         Image("crumplednote") 
                              .resizable().scaledToFit()
                              .frame(width: 24, height: 24)
+                             .foregroundColor(timerColor) // Apply timerColor to image if it's a template
                          Text("Timer")
                              .font(.caption)
+                             .foregroundColor(timerColor)
                      }
                  }
                 .buttonStyle(.plain)
+                .onHover { hovering in isHoveringTimer = hovering }
                 
-                Text("•").foregroundColor(.gray)
+                Text("•").foregroundColor(dividerColor)
                 
                 // AI Chat Button
                 Button { /* ... */ } label: { 
@@ -105,15 +114,26 @@ struct BottomNavView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isFetchingAIResponse) 
+                .foregroundColor(isHoveringChat ? textHoverColor : textColor)
+                .onHover { hovering in isHoveringChat = hovering }
                 
-                Text("•").foregroundColor(.gray)
+                Text("•").foregroundColor(dividerColor)
                 
                 // Fullscreen Button
-                Button(isFullscreen ? "Minimize" : "Fullscreen") { /* ... */ }
-                     .buttonStyle(.plain)
-                     .foregroundColor(isHoveringFullscreen ? textHoverColor : textColor)
+                Button { isFullscreen.toggle() } label: { 
+                     VStack(spacing: 3) {
+                        Image(systemName: isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .resizable().scaledToFit()
+                            .frame(width: 18, height: 18) // Adjusted size for SF Symbol
+                        Text(isFullscreen ? "Minimize" : "Fullscreen")
+                            .font(.caption)
+                     }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(isHoveringFullscreen ? textHoverColor : textColor)
+                .onHover { hovering in isHoveringFullscreen = hovering }
                 
-                Text("•").foregroundColor(.gray)
+                Text("•").foregroundColor(dividerColor)
                 
                 // New Entry Button
                 Button { 
@@ -127,8 +147,10 @@ struct BottomNavView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .foregroundColor(isHoveringNewEntry ? textHoverColor : textColor)
+                .onHover { hovering in isHoveringNewEntry = hovering }
                 
-                Text("•").foregroundColor(.gray)
+                Text("•").foregroundColor(dividerColor)
                 
                 // History Button
                 Button {
@@ -143,6 +165,8 @@ struct BottomNavView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .foregroundColor(isHoveringClock ? textHoverColor : textColor) // Assuming isHoveringClock for history
+                .onHover { hovering in isHoveringClock = hovering } // Assuming isHoveringClock for history
             }
             .padding(8)
             .cornerRadius(6)

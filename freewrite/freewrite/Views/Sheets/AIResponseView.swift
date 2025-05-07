@@ -13,246 +13,288 @@ struct BrandColors {
 
 // MARK: - AI Response Sheet View
 struct AIResponseView: View {
-    // Remove isPresented binding if sheet is controlled by .sheet(item:)
-    // @Binding var isPresented: Bool 
-    @EnvironmentObject var viewModel: ContentViewModel // Access ViewModel
-    let sections: [MarkdownSection] // Keep receiving sections
+    @EnvironmentObject var viewModel: ContentViewModel
+    let sections: [MarkdownSection]
+    @AppStorage("colorScheme") private var colorSchemeString: String = "light" // ADDED
     
-    // Add state to track the current visible card index and favorite status
     @State private var currentCardIndex = 0
-    // Get the current entry's favorite status (needs access to the entry ID)
     private var isCurrentEntryFavorite: Bool {
         guard let entryId = viewModel.selectedEntryId,
-              let entry = viewModel.entries.first(where: { $0.id == entryId }) else {
-            return false
-        }
+              let entry = viewModel.entries.first(where: { $0.id == entryId }) else { return false }
         return entry.isFavorite
     }
 
-    // State for sharing
     @State private var showShareSheet = false
     @State private var sharedImage: UIImage? = nil
     @State private var isPreparingShareImage = false
-
-    // Define color from reference - Use BrandColors
-    // private let cardBackgroundColor = Color(red: 1.0, green: 0.96, blue: 0.86)
-
-    // Use brand colors
-    // private let gradientStart = Color(red: 0.9, green: 0.85, blue: 1.0) // Lavender-ish
-    // private let gradientEnd = Color(red: 0.85, green: 0.95, blue: 0.9)   // Mint-ish
-    // private let activePillColor = Color(red: 0.6, green: 0.9, blue: 0.8) // Mint green
+    @State private var entryUIImage: UIImage? = nil
 
     var body: some View {
         NavigationView { 
             VStack(spacing: 0) { 
                 if sections.isEmpty {
-                    Text("No feedback generated or content was only a greeting.")
-                        .foregroundStyle(.secondary)
-                        .padding()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(BrandColors.cream) // Use cream background
+                    emptyStateView
                 } else {
-                    VStack(spacing: 0) { // Main container for TabView + Pills
-                        TabView(selection: $currentCardIndex) {
-                            ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                                // --- Card View --- 
-                                ScrollView(.vertical, showsIndicators: true) { 
-                                    ZStack(alignment: .topTrailing) { // Use ZStack for overlay
-                                        VStack(spacing: 20) { // Arrange card content vertically
-                                            Spacer()
-                                            
-                                            Image("AICardIllustration") // Use your asset name
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(height: 100) // Adjust size
-                                                
-                                            VStack(alignment: .center, spacing: 10) {
-                                                if let title = section.title, !title.isEmpty { 
-                                                    Text(title) 
-                                                         // Use serif font
-                                                        .font(Font.custom("Georgia-Bold", size: 28))
-                                                        .foregroundColor(BrandColors.darkBrown)
-                                                        .padding(.bottom, 5)
-                                                }
-                                                Text(LocalizedStringKey(section.content)) 
-                                                    .font(.system(size: 17)) // Standard body size
-                                                    .lineSpacing(5) 
-                                                    .foregroundColor(BrandColors.darkBrown.opacity(0.9))
-                                                    .multilineTextAlignment(.leading) // Align text to the left
-                                                    // Ensure text takes available width 
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                            }
-                                            .padding(.horizontal, 25)
-                                            
-                                            Spacer()
-                                            Spacer()
-                                        } // End VStack Content
-                                        
-                                        // Add Accent Raccoon Image Overlay
-                                        Image("Raccoon_Lightbulb")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 50, height: 50) // Adjust size
-                                            .padding(15) // Padding from corner
-                                            .opacity(0.8) // Make it slightly subtle
-                                    }
-                                } // End ScrollView
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .padding(.vertical, 20) // Add vertical padding inside card
-                                // Use a card background color
-                                .background(BrandColors.mintGreen.opacity(0.6)) // Example: mint green
-                                .cornerRadius(20) // More rounded corners for card
-                                .padding(.horizontal, 20) // Padding around card
-                                .padding(.bottom, 10) // Space above pills
-                               .tag(index) 
-                               // --- End Card View --- 
-                            }
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never)) 
-                        
-                        // --- Action Buttons --- 
-                        HStack(spacing: 20) {
-                            Spacer() // Push buttons to center
-
-                            // Favorite Button
-                            Button {
-                                if let entryId = viewModel.selectedEntryId {
-                                    viewModel.toggleFavorite(for: entryId)
-                                    // Force view update if necessary, though @EnvironmentObject should handle it
-                                }
-                            } label: {
-                                Label("Favorite", systemImage: isCurrentEntryFavorite ? "heart.fill" : "heart")
-                                    .labelStyle(.iconOnly)
-                                    .font(.title2)
-                                    .foregroundColor(isCurrentEntryFavorite ? BrandColors.accentPink : BrandColors.darkBrown.opacity(0.7)) // Use accentPink
-                            }
-                            
-                            // Copy Button
-                            Button {
-                                viewModel.copyAIResponseToClipboard(sections: sections)
-                                // Add user feedback? Maybe a temporary message?
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .labelStyle(.iconOnly)
-                                    .font(.title2)
-                                    .foregroundColor(BrandColors.darkBrown.opacity(0.7))
-                            }
-
-                            // Share Button
-                            Button {
-                                Task {
-                                    await prepareShareImage()
-                                }
-                            } label: {
-                                Label("Share", systemImage: "square.and.arrow.up")
-                                    .labelStyle(.iconOnly)
-                                    .font(.title2)
-                                    .foregroundColor(BrandColors.darkBrown.opacity(0.7))
-                            }
-                            .disabled(isPreparingShareImage) // Disable while generating image
-
-                            Spacer() // Push buttons to center
-                        }
-                        .padding(.vertical, 15)
-                        .padding(.horizontal)
-                        .background(BrandColors.cream) // Match main background
-                        // Add overlay for preparing image indicator?
-                        .overlay {
-                            if isPreparingShareImage {
-                                ProgressView()
-                                    .tint(BrandColors.darkBrown)
-                            }
-                        }
-                        // --- End Action Buttons ---
-                        
-                        // --- Progress Pill Hint --- 
-                        if sections.count > 1 {
-                            HStack(spacing: 8) {
-                                ForEach(0..<sections.count, id: \.self) { index in
-                                    Circle()
-                                        // Use brand colors for pills
-                                        .fill(index == currentCardIndex ? BrandColors.darkBrown : BrandColors.lightBrown.opacity(0.6))
-                                        .frame(width: 8, height: 8)
-                                }
-                            }
-                            .padding(.bottom, 10)
-                            .transition(.opacity)
-                        }
-                        // --- End Progress Pill Hint --- 
-                    }
-                    .background(BrandColors.cream) // Ensure VStack background is set
-                    .navigationTitle("Entry Insights")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { viewModel.activeSheet = nil }
-                        }
-                    }
+                    contentAndControlsView
                 }
             }
-            .accentColor(BrandColors.darkBrown)
-            .background(BrandColors.cream.ignoresSafeArea()) // Apply to whole NavigationView content
-            // --- Share Sheet Modifier --- 
-            .sheet(isPresented: $showShareSheet) {
-                // Present share sheet AFTER image is prepared
-                if let imageToShare = sharedImage {
-                    ActivityViewController(activityItems: [imageToShare])
-                } else {
-                    // Optional: Show an error or placeholder if image generation failed
-                    Text("Could not prepare image for sharing.")
-                }
+            .accentColor(BrandColors.accentColor(for: colorSchemeString)) // MODIFIED
+            .background(BrandColors.background(for: colorSchemeString).ignoresSafeArea()) // MODIFIED
+            .onAppear(perform: loadEntryImage)
+            .sheet(isPresented: $showShareSheet, content: shareSheetContent)
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    // Extracted Empty State View
+    private var emptyStateView: some View {
+        Text("No feedback generated or content was only a greeting.")
+            .foregroundStyle(BrandColors.secondaryText(for: colorSchemeString)) // MODIFIED
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(BrandColors.background(for: colorSchemeString)) // MODIFIED
+    }
+
+    // Extracted Content and Controls View
+    private var contentAndControlsView: some View {
+        VStack(spacing: 0) {
+            tabViewContent
+            actionButtonsView
+            if sections.count > 1 {
+                progressPillsView
             }
         }
-        .navigationViewStyle(.stack) // Add stack style for consistent presentation
+        .background(BrandColors.background(for: colorSchemeString)) // MODIFIED
+        .navigationTitle("Entry Insights")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarContent }
+    }
+
+    // Extracted TabView Content
+    private var tabViewContent: some View {
+        TabView(selection: $currentCardIndex) {
+            ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                Group {
+                    if section.title == "Poetic Reflection", let image = entryUIImage {
+                        poeticReflectionCard(section: section, image: image)
+                    } else {
+                        standardInsightCard(section: section, userImage: entryUIImage)
+                    }
+                }
+               .tag(index)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
+    // Extracted Poetic Reflection Card
+    @ViewBuilder
+    private func poeticReflectionCard(section: MarkdownSection, image: UIImage) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Poetic Reflection")
+                .font(Font.custom("Georgia-Bold", size: 22))
+                .foregroundColor(BrandColors.primaryText(for: colorSchemeString)) // MODIFIED
+            ZStack {
+                Image(uiImage: image).resizable().scaledToFill().cornerRadius(10).clipped()
+                VStack { 
+                    Spacer()
+                    Text(section.content).font(.custom("Lato-Regular", size: 19)).foregroundColor(.white)
+                        .multilineTextAlignment(.center).padding(10).background(Color.black.opacity(0.4)).cornerRadius(8)
+                    Spacer()
+                }.padding(15)
+            }
+            .frame(width: UIScreen.main.bounds.width - 30, height: UIScreen.main.bounds.width - 30)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .background(BrandColors.secondaryBackground(for: colorSchemeString)) // MODIFIED
+        .cornerRadius(15)
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(BrandColors.lightBrown.opacity(0.5), lineWidth: 1))
+        .shadow(color: BrandColors.defaultDarkBrown.opacity(0.1), radius: 5, x: 0, y: 3) // MODIFIED
+        .padding(.horizontal, 15)
+        .padding(.bottom, 10)
+    }
+
+    // Extracted Standard Insight Card
+    @ViewBuilder
+    private func standardInsightCard(section: MarkdownSection, userImage: UIImage?) -> some View {
+        ScrollView(.vertical, showsIndicators: true) { 
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: 15) {
+                    if let uImage = userImage {
+                        Image(uiImage: uImage).resizable().scaledToFit().frame(maxWidth: .infinity).frame(maxHeight: 250).cornerRadius(10).clipped()
+                    } else {
+                        Image("AICardIllustration").resizable().scaledToFit().frame(height: 100)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let title = section.title, !title.isEmpty { 
+                            Text(title).font(Font.custom("Georgia-Bold", size: 24))
+                                .foregroundColor(BrandColors.primaryText(for: colorSchemeString)) // MODIFIED
+                                .padding(.bottom, 2)
+                        }
+                        Text(LocalizedStringKey(section.content)).font(.custom("Lato-Regular", size: 17)).lineSpacing(5)
+                            .foregroundColor(BrandColors.primaryText(for: colorSchemeString).opacity(0.9)) // MODIFIED
+                            .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(.horizontal, 20)
+                }.padding(.vertical, 20)
+                Image("Raccoon_Lightbulb").resizable().scaledToFit().frame(width: 40, height: 40).padding(12).opacity(0.9)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(BrandColors.secondaryBackground(for: colorSchemeString)) // MODIFIED
+        .cornerRadius(15)
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(BrandColors.lightBrown.opacity(0.5), lineWidth: 1))
+        .shadow(color: BrandColors.defaultDarkBrown.opacity(0.1), radius: 5, x: 0, y: 3) // MODIFIED
+        .padding(.horizontal, 15)
+        .padding(.bottom, 10)
+    }
+
+    // Extracted Action Buttons View
+    private var actionButtonsView: some View {
+        VStack(spacing: 5) {
+            HStack(spacing: 20) {
+                Spacer()
+                Button {
+                    #if os(iOS)
+                    let impactGenerator = UIImpactFeedbackGenerator(style: .medium) // Medium for favorite
+                    impactGenerator.prepare()
+                    impactGenerator.impactOccurred()
+                    #endif
+                    if let entryId = viewModel.selectedEntryId { viewModel.toggleFavorite(for: entryId) }
+                } label: { Label("Favorite", systemImage: isCurrentEntryFavorite ? "heart.fill" : "heart").labelStyle(.iconOnly).font(.title2)
+                    .foregroundColor(isCurrentEntryFavorite ? BrandColors.accentPink : BrandColors.primaryText(for: colorSchemeString).opacity(0.7)) // MODIFIED
+                }
+                Button {
+                    #if os(iOS)
+                    let impactGenerator = UIImpactFeedbackGenerator(style: .light) // Light for copy
+                    impactGenerator.prepare()
+                    impactGenerator.impactOccurred()
+                    #endif
+                    viewModel.copyAIResponseToClipboard(sections: sections)
+                } label: { Label("Copy", systemImage: "doc.on.doc").labelStyle(.iconOnly).font(.title2)
+                    .foregroundColor(BrandColors.primaryText(for: colorSchemeString).opacity(0.7)) // MODIFIED
+                }
+                Button {
+                    #if os(iOS)
+                    let impactGenerator = UIImpactFeedbackGenerator(style: .light) // Light for share
+                    impactGenerator.prepare()
+                    impactGenerator.impactOccurred()
+                    #endif
+                    Task { await prepareShareImage() }
+                } label: { Label("Share", systemImage: "square.and.arrow.up").labelStyle(.iconOnly).font(.title2)
+                    .foregroundColor(BrandColors.primaryText(for: colorSchemeString).opacity(0.7)) // MODIFIED
+                }.disabled(isPreparingShareImage)
+                Button {
+                    Task { await viewModel.fetchGeneratedPoem() }
+                } label: { Label("Get Poem", systemImage: "wand.and.stars").labelStyle(.iconOnly).font(.title2)
+                    .foregroundColor(BrandColors.primaryText(for: colorSchemeString).opacity(0.7)) // MODIFIED
+                }.disabled(viewModel.isFetchingPoem || viewModel.isFetchingAIResponse)
+                Spacer()
+            }
+            .padding(.vertical, 10).padding(.horizontal)
+            .overlay { if isPreparingShareImage || viewModel.isFetchingPoem { ProgressView().tint(BrandColors.primaryText(for: colorSchemeString)) } } // MODIFIED
+            if let poemError = viewModel.poemError {
+                Text(poemError).font(.caption).foregroundColor(.red).padding(.horizontal).transition(.opacity)
+            }
+        }
+        .padding(.bottom, 5)
+        .background(BrandColors.background(for: colorSchemeString)) // MODIFIED
+    }
+
+    // Extracted Progress Pills View
+    private var progressPillsView: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<sections.count, id: \.self) { index in
+                Circle()
+                    .fill(index == currentCardIndex ? BrandColors.primaryText(for: colorSchemeString) : BrandColors.lightBrown.opacity(0.6)) // MODIFIED
+                    .frame(width: 8, height: 8)
+            }
+        }
+        .padding(.bottom, 10)
+        .transition(.opacity)
+    }
+
+    // Extracted Toolbar Content
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button("Done") { viewModel.activeSheet = nil }
+        }
+    }
+    
+    // Extracted Share Sheet Content
+    @ViewBuilder
+    private func shareSheetContent() -> some View {
+        if let imageToShare = sharedImage {
+            ActivityViewController(activityItems: [imageToShare])
+        } else {
+            Text("Could not prepare image for sharing.")
+        }
+    }
+
+    // Function to load the entry's associated image
+    private func loadEntryImage() {
+        guard let entryId = viewModel.selectedEntryId,
+              let entry = viewModel.entries.first(where: { $0.id == entryId }),
+              let filename = entry.photoFilename, !filename.isEmpty 
+        else { return }
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let freewriteDirectory = documentsDirectory.appendingPathComponent("Freewrite")
+        let fileURL = freewriteDirectory.appendingPathComponent(filename)
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let imageData = try? Data(contentsOf: fileURL), let uiImage = UIImage(data: imageData) {
+                DispatchQueue.main.async { self.entryUIImage = uiImage }
+            }
+        }
     }
     
     // Function to generate the snapshot
     @MainActor
     private func prepareShareImage() async {
-        print("DEBUG: Preparing share image...")
         isPreparingShareImage = true
-        sharedImage = nil // Clear previous image
+        sharedImage = nil
         
-        // Construct the view to snapshot
-        let insightToShare = sections.map { $0.content }.joined(separator: "\n\n") // Combine sections for now
+        // Get the current section based on currentCardIndex
+        guard sections.indices.contains(currentCardIndex) else {
+            print("Error: currentCardIndex is out of bounds for sections.")
+            isPreparingShareImage = false
+            return
+        }
+        let currentSection = sections[currentCardIndex]
+        let shareTitle = currentSection.title
+        let shareContent = currentSection.content
+        
         let currentEntry = viewModel.entries.first { $0.id == viewModel.selectedEntryId }
+        
         let shareContentView = ShareView(
-            insightText: insightToShare,
+            title: shareTitle,
+            contentText: shareContent,
             mood: currentEntry?.mood,
-            entryDate: currentEntry?.date ?? ""
+            entryDate: currentEntry?.date ?? "",
+            snapshotImage: (shareTitle == "Poetic Reflection") ? self.entryUIImage : nil
         )
         
-        // Define the target rendering size (e.g., higher resolution for sharing)
-        let targetSize = CGSize(width: 1080, height: 1920) // Example 9:16 aspect ratio
-
-        // Add a small delay to allow UI to potentially settle if needed
-        // await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        let targetSize = CGSize(width: 1080, height: 1920) // Standard story size
+        // Ensure the view is sized appropriately before snapshotting
+        let finalViewToSnapshot = shareContentView
+            .frame(width: targetSize.width, height: targetSize.height)
+            
+        sharedImage = freewriteOS.renderViewToImage(view: finalViewToSnapshot, targetSize: targetSize) // Updated to call the global function
         
-        // Generate the snapshot using the RENAMED utility function
-        sharedImage = renderViewToImage(view: shareContentView.frame(width: targetSize.width), targetSize: targetSize)
-                                
         isPreparingShareImage = false
-        
         if sharedImage != nil {
-            print("DEBUG: Share image prepared successfully.")
-            showShareSheet = true // Trigger the share sheet
-        } else {
-            print("ERROR: Failed to generate snapshot for sharing.")
-            // Optionally show an error alert to the user
+            showShareSheet = true
         }
     }
 }
 
 // MARK: - ActivityViewController for Share Sheet
-// Helper to wrap UIActivityViewController for SwiftUI
 struct ActivityViewController: UIViewControllerRepresentable {
     var activityItems: [Any]
     var applicationActivities: [UIActivity]? = nil
-
     func makeUIViewController(context: Context) -> UIActivityViewController {
-        let controller = UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
-        return controller
+        return UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
     }
-
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 } 

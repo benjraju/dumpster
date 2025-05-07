@@ -15,6 +15,8 @@ struct freewriteApp: App {
     #endif
     @AppStorage("colorScheme") private var colorSchemeString: String = "light"
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @AppStorage("hasCompletedGoalSelection") private var hasCompletedGoalSelection: Bool = false
+    @AppStorage("justCompletedFullOnboarding") private var justCompletedFullOnboarding: Bool = false
     // State to manage showing the splash screen after onboarding
     @State private var showSplash = true
     
@@ -37,8 +39,18 @@ struct freewriteApp: App {
                 if !hasCompletedOnboarding {
                     OnboardingView(showSplash: $showSplash)
                         .environmentObject(viewModel) // Inject viewModel
+                } else if !hasCompletedGoalSelection {
+                    GoalSelectionView()
+                        .environmentObject(viewModel)
+                        .onDisappear {
+                            // Check if both onboarding and goal selection are now complete
+                            if hasCompletedOnboarding && hasCompletedGoalSelection {
+                                justCompletedFullOnboarding = true
+                                print("DEBUG: Full onboarding complete, setting justCompletedFullOnboarding to true")
+                            }
+                        }
                 } else {
-                    // Onboarding is complete. Decide whether to show splash or content.
+                    // Onboarding and Goal Selection are complete. Decide whether to show splash or content.
                     if showSplash { // Only show splash if flag is initially true AND not just onboarded
                         WelcomeSplashView()
                             .onAppear {
@@ -52,8 +64,8 @@ struct freewriteApp: App {
                     } else { // Splash timer finished or showSplash was set to false by OnboardingView
                          ContentView()
                              .environmentObject(viewModel) // Inject viewModel
-                             .accentColor(BrandColors.darkBrown)
-                             .preferredColorScheme(colorSchemeString == "dark" ? .dark : .light)
+                             .accentColor(BrandColors.accentColor(for: colorSchemeString))
+                             .preferredColorScheme(determineColorScheme(from: colorSchemeString))
                     }
                 }
             }
@@ -70,8 +82,11 @@ struct freewriteApp: App {
                  if !hasCompletedOnboarding {
                      OnboardingView(showSplash: $showSplash)
                          .environmentObject(viewModel) // Inject viewModel
+                 } else if !hasCompletedGoalSelection {
+                     GoalSelectionView()
+                         .environmentObject(viewModel)
                  } else {
-                    // Onboarding is complete. Decide whether to show splash or content.
+                    // Onboarding and Goal Selection are complete. Decide whether to show splash or content.
                      if showSplash { // Only show splash if flag is initially true AND not just onboarded
                          WelcomeSplashView()
                              .onAppear {
@@ -85,13 +100,25 @@ struct freewriteApp: App {
                      } else { // Splash timer finished or showSplash was set to false by OnboardingView
                          ContentView()
                              .environmentObject(viewModel) // Inject viewModel
-                             .accentColor(BrandColors.darkBrown)
-                             .preferredColorScheme(colorSchemeString == "dark" ? .dark : .light)
+                             .accentColor(BrandColors.accentColor(for: colorSchemeString))
+                             .preferredColorScheme(determineColorScheme(from: colorSchemeString))
                      }
                  }
             }
         }
         #endif
+    }
+}
+
+// Helper function to determine ColorScheme based on theme string
+private func determineColorScheme(from themeString: String) -> ColorScheme? {
+    switch themeString {
+    case "light", "sepia", "dracula_lite":
+        return .light
+    case "dark", "nord":
+        return .dark
+    default:
+        return nil // Or .light as a fallback
     }
 }
 

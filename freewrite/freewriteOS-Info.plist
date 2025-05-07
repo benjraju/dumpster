@@ -4,5 +4,9 @@
 <dict>
 	<key>OpenAIAPIKey</key>
 	<string>$(OPENAI_API_KEY)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>To allow you to capture a photo with your check-in, helping you remember your surroundings or mood at the time of your entry.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>To allow you to select a photo from your library to attach to your journal entry.</string>
 </dict>
 </plist>

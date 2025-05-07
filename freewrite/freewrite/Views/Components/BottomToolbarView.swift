@@ -76,7 +76,24 @@ struct BottomToolbarView: View {
 
              Spacer()
 
-             // "Done Dumping?" Button (Replaces AI Chat Button)
+             // View Insights Button (NEW)
+             Button {
+                 print("DEBUG: View Insights button tapped")
+                 activeSheet = .aiResponse
+             } label: {
+                 VStack(spacing: 2) {
+                    Image(systemName: "sparkles.rectangle.stack") // New icon
+                        .resizable().scaledToFit()
+                        .frame(width: 30, height: 30)
+                    Text("Insights") // New label
+                         .font(.caption2)
+                 }
+             }
+             .disabled(viewModel.aiResponseSections.isEmpty) // Disable if no insights loaded
+
+             Spacer()
+
+             // "Done Dumping?" / Generate AI Button
              Button {
                  print("DEBUG: Done Dumping button tapped")
                  saveCurrentEntryAction() // Save the current entry text
@@ -91,7 +108,7 @@ struct BottomToolbarView: View {
                     Image("IconChatRaccoonActive") // Keep icon? Or new one?
                         .resizable().scaledToFit()
                         .frame(width: 32, height: 32) // Keep larger size
-                    Text("Done?") // Changed Text
+                    Text("Insights") // Shortened label
                          .font(.caption2)
                  }
              }

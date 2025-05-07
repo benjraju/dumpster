@@ -8,6 +8,9 @@
 import Foundation
 import SwiftUI // Import SwiftUI for @Published, ColorScheme, etc. if needed later
 import SafariServices
+import AVFoundation // ADDED for camera access
+import Photos // ADDED for photo library access
+import PhotosUI // ADDED for PhotoPicker
 
 // MARK: - Removed Model Definitions (Moved to Models/AppDataModels.swift)
 /*
@@ -58,6 +61,19 @@ class ContentViewModel: ObservableObject {
     @Published var activeSheet: ActiveSheet? = nil // <-- Use the enum here
     // @Published var showingAIResponseSheet: Bool = false 
     
+    @Published var selectedInsightMode: InsightMode = .standard {
+        didSet {
+            UserDefaults.standard.set(selectedInsightMode.rawValue, forKey: "selectedInsightMode")
+            print("DEBUG: Insight mode saved: \\(selectedInsightMode.rawValue)")
+        }
+    }
+    
+    // ADDED: For Prompt Chaining
+    @Published var lastAskedGuidingQuestion: String? = nil
+    
+    // ADDED: For Check-in Snapshot image data
+    @Published var selectedImageDataForEntry: Data? = nil
+    
     // Timer for auto-dismissing errors
     private var errorDismissTimer: Timer?
     
@@ -98,20 +114,65 @@ class ContentViewModel: ObservableObject {
     
     // ADDED: New prompt for in-line guiding questions
     private let aiGuidingQuestionPrompt = """
-    You are an AI assistant integrated into a writing app. The user has written the text below and pressed a button requesting a prompt to help them dive deeper or keep writing.
-    Analyze the user's text (and potentially their stated mood) and provide ONE SINGLE concise, open-ended question that gently encourages further reflection or exploration based on what they've written.
-    The question should feel like a natural continuation or a gentle nudge, tailored to the user's mood if provided.
-    Keep it short (ideally under 15 words).
-    Do NOT offer summaries, analysis, or multiple questions.
+    You are an AI assistant. Your SOLE task is to provide ONE SINGLE concise, open-ended question based on the user\'s text below.
+    The question should encourage further reflection or exploration.
+    OUTPUT ONLY THE QUESTION. Do NOT provide any preamble, summary, or analysis.
+    The question should be short and directly related to their writing.
+    If the user\'s text is very short or unclear, ask a general open-ended question like "What else is on your mind regarding this?" or "How does this make you feel?".
     Do NOT use markdown.
-    Focus on asking "what", "how", "why", or "tell me more" style questions related to the *content* of their writing.
 
-    User's Mood (if provided): [MOOD]
-    User's Recent Text:
+    User\'s Mood (if provided): [MOOD]
+    User\'s Recent Text:
     """
     
-    // TODO: Move other relevant state/logic here later (e.g., entries, text, save/load) -> Done for entries/selectedId/text
+    private let aiPoemPrompt = """
+    Analyze the following journal entry. Your task is to generate a short, insightful, and creative poem (either a 3-line haiku or a 2-4 line freeform verse) that captures the core essence, a key theme, or a poignant feeling from the text.
 
+    The poem should:
+    - Be reflective and offer a moment of beauty or gentle insight.
+    - Use vivid imagery and employ sensory details.
+    - Evoke a strong emotion or offer a fresh perspective related to the entry's content.
+    - Resonate with the user on an emotional level, offering a sense of connection or a beautiful new way to see their own words.
+    - Not be a summary of the entry.
+    - **Stylistic Influence:** If appropriate for the content, try to evoke the style of a renowned mystical poet like Rumi, focusing on themes of inner reflection, connection, and the search for meaning. Otherwise, maintain a contemporary freeform style.
+    - The poem should have a serene and contemplative tone.
+
+    Do not include any introductory or concluding phrases, just the poem itself. 
+    Avoid quotation marks around the poem unless they are part of the poem's content. Output only the poem.
+
+    Journal Entry:
+    """
+    
+    // ADDED: New prompt for follow-up guiding questions
+    private let aiFollowUpGuidingQuestionPrompt = """
+    You are an AI assistant. The user was previously asked: "[PREVIOUS_QUESTION]"
+    They have since added to their text. Their complete current text is below.
+    Your SOLE task is to provide ONE SINGLE concise, open-ended follow-up question based on their newest additions and the previous question.
+    The question should encourage further reflection. Aim to introduce a new angle or deeper dive.
+    OUTPUT ONLY THE QUESTION. Do NOT provide any preamble, summary, or analysis.
+    The question should be short. Do NOT repeat the previous question.
+    Do NOT use markdown.
+
+    User's Current Text (including response to your last question):
+    """
+    
+    // Poem Generation State
+    @Published var generatedPoem: String? = nil // Will be integrated into aiResponseSections
+    @Published var isFetchingPoem: Bool = false
+    @Published var poemError: String? = nil {
+        didSet {
+            poemErrorDismissTimer?.invalidate()
+            if poemError != nil {
+                poemErrorDismissTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
+                    Task { @MainActor in
+                        self?.poemError = nil
+                    }
+                }
+            }
+        }
+    }
+    private var poemErrorDismissTimer: Timer?
+    
     // MARK: - State for Custom Calendar
     @Published var displayedMonth: Date = {
         // Get the current date and modify it to the first day of the current month
@@ -128,6 +189,9 @@ class ContentViewModel: ObservableObject {
     init() {
         // Initialization logic if needed
         // No need to load entries here, View's onAppear will trigger it
+        let savedModeRawValue = UserDefaults.standard.string(forKey: "selectedInsightMode") ?? InsightMode.standard.rawValue
+        self.selectedInsightMode = InsightMode(rawValue: savedModeRawValue) ?? .standard
+        print("DEBUG: Insight mode loaded: \\(self.selectedInsightMode.rawValue)")
     }
     
     // MARK: - Timer Management (REMOVED)
@@ -194,6 +258,75 @@ class ContentViewModel: ObservableObject {
         return sections
     }
 
+    // MARK: - AI Prompt Generation
+    private func systemPromptForCurrentMode() -> String {
+        let baseInstructions = """
+        Treat the entry below like a pile of thoughts someone just brain-dumped. Your job isn't to be a therapist, but more like that one insightful friend who listens, connects dots the person might miss, and maybe offers a gentle nudge or a different perspective.
+        - **What NOT to do:** Don't just summarize point-by-point. Don't give generic advice. Don't use overly therapeutic jargon. Don't sound *exactly* like the user, be a distinct friendly voice.
+        - **Format:**
+          - Structure your response with Markdown headings (e.g., `# Key Observation`, `## Supporting Detail`) to create 2-3 distinct sections. Each section should fit well on a single card.
+          - Within each section, use concise paragraphs (2-4 sentences long is ideal).
+          - If listing multiple related ideas or steps within a section, use bullet points (e.g., `* First idea`, `- Second idea`).
+          - Use markdown bolding **only** for truly key takeaways or shifts in perspective you want to highlight (use sparingly).
+          - The overall response should be easily digestible, aiming for around 150-250 words in total.
+        """
+
+        switch selectedInsightMode {
+        case .standard:
+            return """
+            Okay, friend, thanks for dumping this here. Let's sort through it.
+            \(baseInstructions)
+            - **Tone:** Casual, warm, empathetic, maybe a tiny bit playful (like a friendly raccoon helper!). Avoid clinical language, overly formal structures, or sounding like a generic chatbot.
+            - **Goal:** Help the user feel seen, understood, and maybe a little lighter or clearer. Make connections *between* different points they raised if possible.
+            Example opening lines (pick one or adapt):
+            * "Whoa, okay, thanks for sharing all that. My first thought is..."
+            * "Got it. Reading through this, what jumps out at me is..."
+            * "Alright, let's unpack this dump..."
+
+            Here's the entry:
+            """
+        case .reflective:
+            return """
+            Alright, let's take a moment with these thoughts.
+            \(baseInstructions)
+            - **Tone:** Gentle, curious, and encouraging deeper thought. Think of yourself as a guide helping them explore their own landscape.
+            - **Goal:** Identify a core emotion or theme the user expresses. Based on this, ask one or two open-ended questions that help them explore its origins, impact, or underlying meaning. For example, "You mentioned feeling X; I wonder what lies beneath that feeling for you?" or "This experience with Y seems significant. What might it be trying to teach you?"
+            - **Focus:** Encourage self-discovery rather than providing direct answers.
+            Example opening lines:
+            * "Thanks for sharing this. Reading it, I'm curious about..."
+            * "This is a rich tapestry of thoughts. Let's explore one thread: ..."
+
+            Here's the entry:
+            """
+        case .toughLove:
+            return """
+            Okay, let's be real for a second. Thanks for putting this out there.
+            \(baseInstructions)
+            - **Tone:** Direct, honest, but still supportive. Not harsh or judgmental, but doesn't shy away from challenging the user if their writing suggests a pattern or a contradiction they might be overlooking.
+            - **Goal:** Help the user see a potentially hard truth or a pattern they might be stuck in. For example, "You\'ve mentioned X a few times. What's one thing you know you need to stop lying to yourself about regarding X?" or "I'm hearing a lot of frustration, but also a sense of wanting things to be different. What's one small, bold step you could take?"
+            - **Focus:** Gentle confrontation for growth.
+            Example opening lines:
+            * "Appreciate the honesty here. Let's cut to the chase..."
+            * "Reading this, it sounds like you're grappling with something important. My direct take is..."
+
+            Here's the entry:
+            """
+        case .comfort:
+            return """
+            Hey, thank you for sharing this. It sounds like a lot is on your mind.
+            \(baseInstructions)
+            - **Tone:** Warm, validating, and reassuring. Like a comforting presence.
+            - **Goal:** Make the user feel heard, validated, and less alone in their feelings. Offer gentle reassurance. For example, "It's okay to feel this way. You did enough today. Rest is the win." or "That sounds really tough, and it's understandable why you'd feel X."
+            - **Focus:** Empathy and validation.
+            Example opening lines:
+            * "Sending a virtual hug after reading that. It's clear you're going through it."
+            * "Thanks for trusting this space. What I'm hearing most is..."
+
+            Here's the entry:
+            """
+        }
+    }
+
     // MARK: - API Call Function
     // Needs the selected entry's filename to save the response
     func fetchAIResponse(/* Removed currentText: String */ entryFilename: String?) async { // Use self.currentText
@@ -215,7 +348,8 @@ class ContentViewModel: ObservableObject {
             return
         }
 
-        let systemMessage = OpenAIMessage(role: "system", content: aiChatPrompt)
+        let currentSystemPrompt = systemPromptForCurrentMode()
+        let systemMessage = OpenAIMessage(role: "system", content: currentSystemPrompt)
         let userMessage = OpenAIMessage(role: "user", content: self.currentText.trimmingCharacters(in: .whitespacesAndNewlines)) // Use self.currentText
         
         guard userMessage.content.count > 25 else {
@@ -292,7 +426,13 @@ class ContentViewModel: ObservableObject {
                     // Update state on main thread
                     self.aiResponseSections = parsedSections 
                     // Always show the sheet on success, even if sections became empty after cleaning
-                    self.activeSheet = .aiResponse 
+                    // self.activeSheet = .aiResponse // MOVED DOWN
+
+                    // ADDED: Fetch poem after main insights are processed
+                    if !parsedSections.isEmpty { // Optionally, only fetch poem if main insights exist
+                        await self.fetchGeneratedPoem() // Will append to aiResponseSections
+                    }
+                    self.activeSheet = .aiResponse // Now show the sheet with all content
                 }
             }
         } catch let error as URLError {
@@ -311,34 +451,152 @@ class ContentViewModel: ObservableObject {
         
         // Reset loading state regardless of outcome
         self.isFetchingAIResponse = false // Use self
+        // ADDED: Reset prompt chain after full analysis is shown
+        if self.activeSheet == .aiResponse {
+           self.lastAskedGuidingQuestion = nil
+           print("DEBUG: Prompt chain reset after full AI analysis.")
+        }
     }
     
-    // MARK: - NEW: AI Guiding Question Function
-    func fetchGuidingQuestion() async {
-        // Simple error/loading for now
-        if isFetchingAIResponse { return } // Don't overlap calls
-        isFetchingAIResponse = true // Reuse indicator for now
-        let originalError = aiError
-        aiError = nil
+    // MARK: - Poem Generation Function
+    func fetchGeneratedPoem() async {
+        if isFetchingAIResponse || isFetchingPoem { return } // Prevent multiple simultaneous calls
+
+        isFetchingPoem = true
+        poemError = nil
+        // generatedPoem = nil // Clear previous poem, will be added as a section
 
         guard let apiKey = getApiKey() else {
-            isFetchingAIResponse = false
-            aiError = originalError // Restore previous error if any
+            poemError = "API Key not configured."
+            isFetchingPoem = false
             return
         }
-
+        
         guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
-            print("Error: Invalid API URL")
-            aiError = "Invalid API endpoint URL."
-            isFetchingAIResponse = false
+            poemError = "Invalid API endpoint URL."
+            isFetchingPoem = false
             return
         }
 
-        // --- Prepare Context ---
-        // Get mood description
-        let moodDescription = selectedMood?.description ?? "Not specified"
+        let entryText = self.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entryText.isEmpty else {
+            poemError = "Cannot generate poem from an empty entry."
+            isFetchingPoem = false
+            return
+        }
+        
+        // It might be good to also check a minimum length here, similar to fetchAIResponse
+        guard entryText.count > 20 else { // Arbitrary short length check
+            poemError = "Please write a bit more before requesting a poem."
+            isFetchingPoem = false
+            return
+        }
 
-        // Get last ~500 characters of text (or less if text is shorter)
+        let systemMessage = OpenAIMessage(role: "system", content: aiPoemPrompt)
+        let userMessage = OpenAIMessage(role: "user", content: entryText)
+        
+        // Using a model known for creativity, max_tokens can be relatively small for a short poem
+        let requestBody = OpenAIRequest(model: "gpt-4o", messages: [systemMessage, userMessage], max_tokens: 100) 
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(requestBody)
+            print("Sending request to OpenAI for poem generation...")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                 print("HTTP Error generating poem: \(httpResponse.statusCode)")
+                 if let decodedError = try? JSONDecoder().decode(OpenAIResponse.self, from: data), let apiError = decodedError.error {
+                     self.poemError = "Poem API Error: \(apiError.message)"
+                 } else {
+                     self.poemError = "Received HTTP status \(httpResponse.statusCode) for poem."
+                 }
+            } else {
+                let decoder = JSONDecoder()
+                let openAIResponse = try decoder.decode(OpenAIResponse.self, from: data)
+
+                if let apiError = openAIResponse.error {
+                     print("Poem API Error: \(apiError.message)")
+                     self.poemError = "Poem API Error: \(apiError.message)"
+                } else {
+                    guard let firstChoice = openAIResponse.choices.first else {
+                        print("Error: No poem choices received")
+                        self.poemError = "No poem content received."
+                        throw URLError(.cannotParseResponse) 
+                    }
+
+                    let poemText = firstChoice.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    print("Poem received: \(poemText)")
+                    
+                    if !poemText.isEmpty {
+                        let poemSection = MarkdownSection(title: "Poetic Reflection", content: poemText)
+                        // Append to existing sections. This will make it appear as a new card.
+                        self.aiResponseSections.append(poemSection)
+                        
+                        // If an entry is selected, also save this appended AI response
+                        if let currentFilename = self.entries.first(where: { $0.id == self.selectedEntryId })?.filename {
+                            await saveAIResponse(sections: self.aiResponseSections, for: currentFilename)
+                        }
+                        
+                    } else {
+                        self.poemError = "The generated poem was empty."
+                    }
+                }
+            }
+        } catch let error as URLError {
+             print("Poem URL Error: \(error)")
+             self.poemError = "Network error for poem: \(error.localizedDescription)"
+        } catch let error as DecodingError {
+            print("Poem Decoding Error: \(error)")
+            self.poemError = "Failed to process poem response."
+        } catch let error as EncodingError {
+            print("Poem Encoding Error: \(error)")
+            self.poemError = "Failed to prepare poem request data."
+        } catch {
+            print("Unexpected Poem Error: \(error)")
+            self.poemError = "An unexpected error occurred while fetching poem: \(error.localizedDescription)"
+        }
+        
+        isFetchingPoem = false
+    }
+    
+    // MARK: - AI Guiding Question Functionality
+    // MODIFIED: This is now the main dispatcher
+    func fetchGuidingQuestion() async {
+        if isFetchingAIResponse || isFetchingPoem { return } // Prevent overlap
+
+        isFetchingAIResponse = true // Use the main AI loading flag
+        // let originalError = aiError // Preserve any existing general AI error
+        aiError = nil // Clear general AI error for this specific operation
+
+        if let previousQuestion = lastAskedGuidingQuestion, !previousQuestion.isEmpty {
+            print("DEBUG: Fetching FOLLOW-UP guiding question.")
+            await fetchFollowUpGuidingQuestion(basedOn: previousQuestion)
+        } else {
+            print("DEBUG: Fetching INITIAL guiding question.")
+            await fetchInitialGuidingQuestion()
+        }
+        
+        isFetchingAIResponse = false
+    }
+
+    // NEW: Private function for Initial Guiding Question
+    private func fetchInitialGuidingQuestion() async {
+        guard let apiKey = getApiKey() else {
+            // getApiKey() already sets self.aiError
+            return
+        }
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            self.aiError = "Invalid API endpoint URL for initial question."
+            return
+        }
+
+        let moodDescription = selectedMood?.description ?? "Not specified"
         let textToAnalyze: String
         let trimmedFullText = self.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
         let maxChars = 500
@@ -348,26 +606,17 @@ class ContentViewModel: ObservableObject {
             let startIndex = trimmedFullText.index(trimmedFullText.endIndex, offsetBy: -maxChars)
             textToAnalyze = String(trimmedFullText[startIndex...])
         }
-        // --- End Prepare Context ---
 
-
-        // Construct the prompt for the system message
-        let systemPromptContent = aiGuidingQuestionPrompt.replacingOccurrences(of: "[MOOD]", with: moodDescription)
-
-        let systemMessage = OpenAIMessage(role: "system", content: systemPromptContent)
-        // The user message now only contains the text snippet
-        let userMessage = OpenAIMessage(role: "user", content: textToAnalyze)
-
-        // Maybe add a minimum length check here too?
-        guard textToAnalyze.count > 10 else { // Check the snippet length
-            print("User text snippet too short for guiding question")
-            aiError = "Write a little more first!"
-            isFetchingAIResponse = false
+        guard textToAnalyze.count > 10 else {
+            self.aiError = "Write a little more before asking for a guiding question."
             return
         }
 
-        // Using a cheaper/faster model might be suitable here if available/desired
-        let requestBody = OpenAIRequest(model: "gpt-4o", messages: [systemMessage, userMessage], max_tokens: 50) // Limit response length
+        let systemPromptContent = aiGuidingQuestionPrompt
+            .replacingOccurrences(of: "[MOOD]", with: moodDescription)
+        let systemMessage = OpenAIMessage(role: "system", content: systemPromptContent)
+        let userMessage = OpenAIMessage(role: "user", content: textToAnalyze)
+        let requestBody = OpenAIRequest(model: "gpt-4o", messages: [systemMessage, userMessage], max_tokens: 80)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -376,40 +625,90 @@ class ContentViewModel: ObservableObject {
 
         do {
             request.httpBody = try JSONEncoder().encode(requestBody)
-            print("Sending request to OpenAI for guiding question (Mood: \(moodDescription), Text length: \(textToAnalyze.count))...")
-
+            print("Sending request for INITIAL guiding question (Mood: \(moodDescription), Text length: \(textToAnalyze.count))...")
             let (data, response) = try await URLSession.shared.data(for: request)
 
-            // Basic HTTP error check
             if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                 let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                 print("HTTP Error: \(httpResponse.statusCode) - \(errorBody)")
-                 self.aiError = "Couldn't get suggestion (HTTP \(httpResponse.statusCode))"
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                self.aiError = "Initial Question Error (HTTP \(httpResponse.statusCode)): \(errorBody.prefix(100))" // Limit error length
             } else {
                 let openAIResponse = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-
-                if let apiError = openAIResponse.error {
-                     print("API Error: \(apiError.message)")
-                     self.aiError = "Suggestion Error: \(apiError.message)"
+                if let apiErr = openAIResponse.error {
+                    self.aiError = "Initial Question API Error: \(apiErr.message)"
                 } else if let firstChoice = openAIResponse.choices.first {
                     let responseText = firstChoice.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                    print("Guiding question received: \(responseText)")
-                    // Append the question to the current text
-                    self.currentText += "\n\n✨ " + responseText + "\n" // Added sparkle for fun!
-                    // Trigger save for the appended text
-                    saveCurrentEntry(currentText: self.currentText) // SAVE the appended text
+                    if !responseText.isEmpty {
+                        self.currentText += "\n\n✨ \(responseText)\n"
+                        self.lastAskedGuidingQuestion = responseText // STORE the asked question
+                        saveCurrentEntry(currentText: self.currentText)
+                    } else {
+                        self.aiError = "Received an empty initial question."
+                    }
                 } else {
-                    print("Error: No response choices received for guiding question")
-                    self.aiError = "Couldn't get suggestion."
+                    self.aiError = "No initial question content received."
                 }
             }
-        } catch {
-            print("Error fetching guiding question: \(error)")
-            self.aiError = "Couldn't get suggestion: \(error.localizedDescription)"
+        } catch let error {
+            self.aiError = "Failed to fetch initial question: \(error.localizedDescription)"
+        }
+    }
+
+    // NEW: Private function for Follow-up Guiding Question
+    private func fetchFollowUpGuidingQuestion(basedOn previousQuestion: String) async {
+        guard let apiKey = getApiKey() else { return } // getApiKey already sets self.aiError
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            self.aiError = "Invalid API endpoint URL for follow-up."
+            return
         }
 
-        // Reset loading state
-        isFetchingAIResponse = false // Reuse the loading flag
+        let fullTextContext = self.currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Ensure there's some new text after the previous question.
+        // This is a basic check; more sophisticated checks might be needed.
+        guard fullTextContext.count > (previousQuestion.count + 5) else {
+            self.aiError = "Please write a response before asking for a follow-up."
+            return
+        }
+
+        let systemPromptContent = aiFollowUpGuidingQuestionPrompt
+            .replacingOccurrences(of: "[PREVIOUS_QUESTION]", with: previousQuestion)
+        let systemMessage = OpenAIMessage(role: "system", content: systemPromptContent)
+        let userMessage = OpenAIMessage(role: "user", content: fullTextContext)
+        let requestBody = OpenAIRequest(model: "gpt-4o", messages: [systemMessage, userMessage], max_tokens: 80)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(requestBody)
+            print("Sending request for FOLLOW-UP guiding question (Prev Q: \(previousQuestion))...")
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                self.aiError = "Follow-up Question Error (HTTP \(httpResponse.statusCode)): \(errorBody.prefix(100))" // Limit error length
+            } else {
+                let openAIResponse = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+                if let apiErr = openAIResponse.error {
+                    self.aiError = "Follow-up Question API Error: \(apiErr.message)"
+                } else if let firstChoice = openAIResponse.choices.first {
+                    let responseText = firstChoice.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                     if !responseText.isEmpty {
+                        self.currentText += "\n\n↪️ \(responseText)\n" // Different emoji for follow-up
+                        self.lastAskedGuidingQuestion = responseText // UPDATE with the new question
+                        saveCurrentEntry(currentText: self.currentText)
+                    } else {
+                        self.aiError = "Received an empty follow-up question."
+                    }
+                } else {
+                    self.aiError = "No follow-up question content received."
+                }
+            }
+        } catch let error {
+            self.aiError = "Failed to fetch follow-up question: \(error.localizedDescription)"
+        }
     }
     
     // MARK: - AI Response Saving
@@ -426,7 +725,7 @@ class ContentViewModel: ObservableObject {
             try data.write(to: fileURL, options: [.atomic])
             print("DEBUG: Successfully saved AI response.")
         } catch {
-            print("ERROR: Failed to save AI response: \(error)")
+            print("ERROR: Failed to save AI response for \(originalFilename): \(error)")
         }
     }
 
@@ -503,7 +802,7 @@ class ContentViewModel: ObservableObject {
                 let filename = fileURL.lastPathComponent
                 
                 // Updated Regex to capture UUID, Date, and optional Mood Initial
-                let pattern = "\\[(.*?)\\]-\\[(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\](?:-\\[([VEP])\\])?\\\\.md"
+                let pattern = "\\[(.*?)\\]-\\[(\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{2})\\](?:-\\[([VEP])\\])?\\.md"
                 guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
                       let match = regex.firstMatch(in: filename, options: [], range: NSRange(location: 0, length: filename.utf16.count))
                 else {
@@ -568,6 +867,9 @@ class ContentViewModel: ObservableObject {
             Task {
                 await updateAllPreviews()
             }
+            
+            // Load favorite statuses after entries are loaded and before selection logic
+            loadFavoriteStatuses()
 
             // Select first entry if none selected or if selected is invalid
             // If no entries, don't automatically create one here. Let the UI prompt for mood first.
@@ -611,6 +913,8 @@ class ContentViewModel: ObservableObject {
         selectedMood = entry.mood // ADDED: Load mood from entry
         loadEntryContent(entry: entries[entryIndex]) // Load content for the selected entry
         loadAIResponse(for: entries[entryIndex].filename) // Load associated AI response
+        self.lastAskedGuidingQuestion = nil // ADDED: Reset prompt chain
+        print("DEBUG: Prompt chain reset due to new entry selection: \(entry.filename)")
     }
 
 
@@ -673,20 +977,25 @@ class ContentViewModel: ObservableObject {
 
     // RENAMED from selectMoodAndCreateEntry
     // Called by MoodSelectionSheet after an emoji is tapped.
-    func finalizeEntryCreation(type: Mood, emoji: MoodEmoji) { // Added type parameter
+    func finalizeEntryCreation(type: Mood, emoji: MoodEmoji) { // Removed photoData parameter
         print("DEBUG: Finalizing new entry. Type: \(type.rawValue), Mood: \(emoji.emoji) (\(emoji.description))")
         
-        // Create the HumanEntry using the selected entry type (Mood enum)
-        let newEntry = HumanEntry.createNew(mood: type) 
+        var newEntry = HumanEntry.createNew(mood: type) // Create as var to modify photoFilename
+
+        // --- Handle saving snapshot image if present ---
+        if let imageData = self.selectedImageDataForEntry {
+            if let savedPhotoFilename = saveImageToDocuments(imageData: imageData, forEntryId: newEntry.id) {
+                newEntry.photoFilename = savedPhotoFilename
+                print("DEBUG: Snapshot image saved as \(savedPhotoFilename) for entry \(newEntry.id)")
+            } else {
+                print("ERROR: Failed to save snapshot image for entry \(newEntry.id)")
+                // Optionally, set an error state for the UI to show?
+            }
+        }
+        // --- End snapshot handling ---
 
         // --- Define initial content based on BOTH type and emoji ---
-        let typePrompt: String
-        switch type {
-            case .vent: typePrompt = "spill the tea..."
-            case .explore: typePrompt = "vibing with some ideas..."
-            case .plan: typePrompt = "okay, what's the vibe check for today?"
-        }
-        let initialContent = "\(emoji.emoji)\n\n\(typePrompt)\n" // Combine emoji and type-specific prompt
+        let initialContent = "\(emoji.emoji)\n" // Combine emoji and type-specific prompt
 
         // --- Save the initial file ---
         self.currentText = initialContent 
@@ -702,16 +1011,41 @@ class ContentViewModel: ObservableObject {
             clearAIResponse() 
             updatePreviewText(for: newEntry.id, savedContent: self.currentText)
             self.entryJustCreated = true // Signal to focus editor
+            self.lastAskedGuidingQuestion = nil // ADDED: Reset prompt chain
+            print("DEBUG: Prompt chain reset due to new entry finalization.")
+
+            // Play success haptic
+            #if os(iOS)
+            let hapticGenerator = UINotificationFeedbackGenerator()
+            hapticGenerator.prepare()
+            hapticGenerator.notificationOccurred(.success)
+            #endif
 
         } catch {
             print("ERROR: Failed to save initial file for new entry: \(newEntry.filename), Error: \(error)")
             // Handle error - maybe revert state?
         }
         
-        // Dismiss the sheet
+        // Clear the selected image data for the next entry
+        self.selectedImageDataForEntry = nil
+        
+        // Dismiss the sheet (assuming activeSheet is managed elsewhere or this is the end of the flow)
         self.activeSheet = nil 
     }
 
+    // MARK: - Image Saving Helper
+    private func saveImageToDocuments(imageData: Data, forEntryId id: UUID) -> String? {
+        let filename = "\(id.uuidString)-photo.jpg" // Or .png if you prefer
+        let fileURL = documentsDirectory.appendingPathComponent(filename) // documentsDirectory is already defined
+
+        do {
+            try imageData.write(to: fileURL, options: [.atomic])
+            return filename
+        } catch {
+            print("ERROR: Could not write image to documents directory: \(error)")
+            return nil
+        }
+    }
 
     // Deletes an entry from the array and the filesystem
     func deleteEntry(entry: HumanEntry) {
@@ -854,13 +1188,52 @@ class ContentViewModel: ObservableObject {
 
     func toggleFavorite(for entryId: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == entryId }) else {
-            print("WARN: Cannot toggle favorite, entry ID \(entryId) not found.")
+            print("WARN: Cannot toggle favorite, entry ID \\(entryId) not found.")
             return
         }
         entries[index].isFavorite.toggle()
-        let isNowFavorite = entries[index].isFavorite
-        print("DEBUG: Toggled favorite for entry \(entryId) to \(isNowFavorite).")
-        // TODO: Add persistence logic here later (e.g., save to UserDefaults, CoreData, etc.)
+        print("DEBUG: Toggled favorite for entry \\(entries[index].filename) to \\(entries[index].isFavorite).")
+        saveFavoriteStatus() // Call to persist the change
+    }
+
+    private func saveFavoriteStatus() {
+        let favoriteEntryIDs = entries.filter { $0.isFavorite }.map { $0.id.uuidString }
+        let fileURL = documentsDirectory.appendingPathComponent("favorites.json")
+        
+        do {
+            let data = try JSONEncoder().encode(favoriteEntryIDs)
+            try data.write(to: fileURL, options: .atomic)
+            print("DEBUG: Favorite statuses saved to favorites.json")
+        } catch {
+            print("ERROR: Failed to save favorite statuses: \\(error)")
+        }
+    }
+
+    private func loadFavoriteStatuses() {
+        let fileURL = documentsDirectory.appendingPathComponent("favorites.json")
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            print("DEBUG: No favorites.json file found. No favorites loaded.")
+            return
+        }
+        
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let favoriteEntryIDs = try JSONDecoder().decode([String].self, from: data)
+            let favoriteUUIDs = Set(favoriteEntryIDs.compactMap { UUID(uuidString: $0) }) // Use Set for faster lookups
+            
+            for i in 0..<entries.count {
+                if favoriteUUIDs.contains(entries[i].id) {
+                    entries[i].isFavorite = true
+                } else {
+                    entries[i].isFavorite = false // Ensure it's false if not in the list
+                }
+            }
+            print("DEBUG: Favorite statuses loaded. \\(favoriteUUIDs.count) favorites found.")
+        } catch {
+            print("ERROR: Failed to load or decode favorite statuses: \\(error)")
+            // Optionally clear all favorites if loading fails to avoid inconsistent state
+            // for i in 0..<entries.count { entries[i].isFavorite = false }
+        }
     }
 
     func copyAIResponseToClipboard(sections: [MarkdownSection]) {
@@ -994,6 +1367,59 @@ class ContentViewModel: ObservableObject {
     func changeMonth(by amount: Int) {
         if let newMonth = Calendar.current.date(byAdding: .month, value: amount, to: displayedMonth) {
             displayedMonth = newMonth
+        }
+    }
+
+    // MARK: - Camera Permission
+    func requestCameraPermission(completion: @escaping (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: // The user has previously granted access to the camera.
+            print("DEBUG: Camera permission already authorized.")
+            completion(true)
+            
+        case .notDetermined: // The user has not yet been asked for camera access.
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    print("DEBUG: Camera permission requested. Granted: \(granted)")
+                    completion(granted)
+                }
+            }
+            
+        case .denied: // The user has previously denied access.
+            print("DEBUG: Camera permission denied.")
+            // TODO: Optionally, set a state here to guide user to settings
+            completion(false)
+            
+        case .restricted: // The user can't grant access due to restrictions.
+            print("DEBUG: Camera permission restricted.")
+            completion(false)
+            
+        @unknown default:
+            print("WARN: Unknown camera authorization status.")
+            completion(false)
+        }
+    }
+
+    // MARK: - Photo Library Permission
+    func requestPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
+        let requiredAccessLevel: PHAccessLevel = .readWrite // Or .addOnly if just saving new photos
+        PHPhotoLibrary.requestAuthorization(for: requiredAccessLevel) { status in
+            DispatchQueue.main.async {
+                switch status {
+                case .authorized, .limited: // Limited access still allows selection via picker
+                    print("DEBUG: Photo Library permission authorized or limited.")
+                    completion(true)
+                case .denied, .restricted:
+                    print("DEBUG: Photo Library permission denied or restricted.")
+                    completion(false)
+                case .notDetermined:
+                    print("DEBUG: Photo Library permission not determined (should have prompted).")
+                    completion(false) // Should ideally not happen if prompt was shown
+                @unknown default:
+                    print("WARN: Unknown Photo Library authorization status.")
+                    completion(false)
+                }
+            }
         }
     }
 } 

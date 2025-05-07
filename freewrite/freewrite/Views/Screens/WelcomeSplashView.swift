@@ -9,20 +9,17 @@ struct WelcomeSplashView: View {
         return formatter.string(from: Date())
     }
     
-    // Use the yellow background color from the onboarding asset
-    private let yellowBackground = Color(red: 1.0, green: 0.9, blue: 0.6)
-
     var body: some View {
         VStack(spacing: 20) {
             Spacer()
             
             Text("Welcome back!")
                 .font(.system(size: 24, weight: .medium))
-                .foregroundColor(BrandColors.darkBrown.opacity(0.8))
+                .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.8))
             
             Text(currentDateString)
                 .font(.system(size: 18, weight: .regular))
-                .foregroundColor(BrandColors.darkBrown.opacity(0.6))
+                .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.6))
                 .padding(.bottom, 30)
                 
             Image("OnboardingTypewriter") // Reuse the typewriter image
@@ -34,12 +31,12 @@ struct WelcomeSplashView: View {
             Text("LET IT ALL OUT.")
                 .font(Font.custom("Georgia-Bold", size: 34))
                 .multilineTextAlignment(.center)
-                .foregroundColor(BrandColors.darkBrown)
+                .foregroundColor(BrandColors.defaultDarkBrown)
 
             Text("Dump your thoughts safely and freely.")
                 .font(.system(size: 18, weight: .regular))
                 .multilineTextAlignment(.center)
-                .foregroundColor(BrandColors.darkBrown.opacity(0.8))
+                .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.8))
                 .padding(.horizontal)
                 .lineSpacing(4)
                 
@@ -47,7 +44,7 @@ struct WelcomeSplashView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(yellowBackground.ignoresSafeArea())
+        .background(BrandColors.cream.ignoresSafeArea())
     }
 }
 

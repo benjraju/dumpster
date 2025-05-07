@@ -13,11 +13,11 @@ struct TutorialView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Hey, welcome to your dumpster! 👋") // Added emoji
                             .font(Font.custom("Georgia-Bold", size: 30))
-                            .foregroundColor(BrandColors.darkBrown)
+                            .foregroundColor(BrandColors.defaultDarkBrown)
 
                         Text("This is your freewrite zone. Type it, don't tidy it. Let Scribbles the raccoon sort the note later.")
                             .font(.system(size: 17))
-                            .foregroundColor(BrandColors.darkBrown.opacity(0.9))
+                            .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.9))
                             .lineSpacing(4)
                     }
 
@@ -39,7 +39,7 @@ struct TutorialView: View {
                             Text("• Come back tomorrow — Dumpster Note pings you; streaks unlock surprise stickers.")
                         }
                         .font(.system(size: 16))
-                        .foregroundColor(BrandColors.darkBrown.opacity(0.9))
+                        .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.9))
                         .lineSpacing(4)
                     }
 
@@ -51,14 +51,14 @@ struct TutorialView: View {
                             Text("• Zero judgment — Scribbles is sworn to secrecy.")
                         }
                         .font(.system(size: 16))
-                        .foregroundColor(BrandColors.darkBrown.opacity(0.9))
+                        .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.9))
                         .lineSpacing(4)
                     }
                     
                     SectionView(title: "Pro-Tip 🚀") { // Added emoji + Section helper
                         Text("Try this for three mornings:\n\"What's the one thing I'm doing today & why does it actually matter?\"\nWrite 15 min straight. No breaks. See if you notice a change.")
                             .font(.system(size: 16))
-                            .foregroundColor(BrandColors.darkBrown.opacity(0.9))
+                            .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.9))
                             .lineSpacing(4)
                             .padding(15)
                             .frame(maxWidth: .infinity, alignment: .leading) // Ensure frame for background
@@ -77,7 +77,7 @@ struct TutorialView: View {
                             Text("• History (🕰️): Swipe left to yeet an entry, long-press to favorite")
                         }
                         .font(.system(size: 16))
-                        .foregroundColor(BrandColors.darkBrown.opacity(0.9))
+                        .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.9))
                         .lineSpacing(4)
                     }
                     
@@ -96,8 +96,8 @@ struct TutorialView: View {
                     }
                 }
             }
-            .background(BrandColors.background(for: .light).ignoresSafeArea()) // Use a light background
-            .accentColor(BrandColors.darkBrown)
+            .background(BrandColors.background(for: "light").ignoresSafeArea())
+            .accentColor(BrandColors.defaultDarkBrown)
         }
         // On iOS, NavigationViews in sheets often need this style
         .navigationViewStyle(.stack) 
@@ -113,7 +113,7 @@ struct SectionView<Content: View>: View {
         VStack(alignment: .leading, spacing: 15) { // Spacing between title and content
             Text(title)
                 .font(Font.custom("Georgia-Bold", size: 24))
-                .foregroundColor(BrandColors.darkBrown)
+                .foregroundColor(BrandColors.defaultDarkBrown)
             
             content // Embed the content passed in
         }
@@ -133,13 +133,13 @@ struct BenefitView: View {
             Text(boost)
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(BrandColors.darkBrown)
+                .foregroundColor(BrandColors.defaultDarkBrown)
             Text("Reason: \(reason)")
                 .font(.subheadline)
-                .foregroundColor(BrandColors.darkBrown.opacity(0.8))
+                .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.8))
             Text("Win: \(win)")
                 .font(.subheadline)
-                .foregroundColor(BrandColors.darkBrown.opacity(0.8))
+                .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.8))
                 .padding(.bottom, 5)
         }
     }

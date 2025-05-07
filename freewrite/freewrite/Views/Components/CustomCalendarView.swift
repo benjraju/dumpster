@@ -63,7 +63,7 @@ struct CustomCalendarView: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.title2)
-                    .foregroundColor(BrandColors.darkBrown)
+                    .foregroundColor(BrandColors.defaultDarkBrown)
             }
             
             Spacer()
@@ -71,7 +71,7 @@ struct CustomCalendarView: View {
             // Use DateFormatter for wider compatibility
             Text(viewModel.displayedMonth, formatter: monthYearFormatter)
                 .font(Font.custom("Georgia-Bold", size: 20))
-                .foregroundColor(BrandColors.darkBrown)
+                .foregroundColor(BrandColors.defaultDarkBrown)
                 
             Spacer()
             
@@ -80,7 +80,7 @@ struct CustomCalendarView: View {
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.title2)
-                    .foregroundColor(BrandColors.darkBrown)
+                    .foregroundColor(BrandColors.defaultDarkBrown)
             }
         }
     }
@@ -98,7 +98,7 @@ struct CustomCalendarView: View {
             ForEach(daysOfWeek, id: \.self) { dayInitial in
                 Text(dayInitial)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(BrandColors.darkBrown.opacity(0.6))
+                    .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.6))
                     .frame(maxWidth: .infinity)
             }
         }

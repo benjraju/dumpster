@@ -9,6 +9,7 @@ struct HumanEntry: Identifiable, Equatable {
     let mood: Mood
     var isFavorite: Bool = false
     let actualDate: Date // Precise date for logic
+    var photoFilename: String? = nil // ADDED for check-in snapshot
     
     // Conformance to Equatable based on ID
     static func == (lhs: HumanEntry, rhs: HumanEntry) -> Bool {
@@ -45,7 +46,8 @@ struct HumanEntry: Identifiable, Equatable {
             previewText: "", // Start with empty preview
             mood: mood, // Store the passed-in mood
             isFavorite: false, // Default favorite to false
-            actualDate: now // Store the actual Date object
+            actualDate: now, // Store the actual Date object
+            photoFilename: nil // ADDED: Initialize photoFilename
         )
     }
 }
@@ -144,7 +146,15 @@ enum Mood: String, CaseIterable, Identifiable {
         switch self {
         case .vent: return "🌀"
         case .explore: return "🌱"
-        case .plan: return "��"
+        case .plan: return "💡"
+        }
+    }
+
+    var illustrationName: String {
+        switch self {
+        case .vent: return "Raccoon_Mood_Venting"
+        case .explore: return "Raccoon_Mood_Exploring"
+        case .plan: return "Raccoon_Lightbulb"
         }
     }
 }
@@ -168,4 +178,45 @@ struct MoodEmoji: Identifiable, Hashable { // Added Hashable for potential use i
         MoodEmoji(emoji: "😅", description: "Anxious"),
         // Add more moods as needed
     ]
+}
+
+enum InsightMode: String, CaseIterable, Identifiable {
+    case standard = "Standard"
+    case reflective = "Reflective"
+    case toughLove = "Tough Love"
+    case comfort = "Comfort"
+
+    var id: String { self.rawValue }
+}
+
+// MARK: - User Goal Enum
+enum UserGoal: String, CaseIterable, Identifiable {
+    case clarity = "Gain Clarity"
+    case creativity = "Spark Creativity"
+    case calm = "Find Calm"
+    case reflection = "Deeper Self-Reflection"
+    case general = "Just Write / Undecided"
+
+    var id: String { self.rawValue }
+
+    var description: String {
+        switch self {
+        case .clarity: return "Untangle your thoughts and see things more clearly."
+        case .creativity: return "Break through blocks and discover new ideas."
+        case .calm: return "Reduce stress and find a moment of peace."
+        case .reflection: return "Understand yourself better and track personal growth."
+        case .general: return "A space to freely express yourself without a specific goal yet."
+        }
+    }
+    
+    // Optional: Suggest an icon or image name for each
+    var iconName: String? {
+        switch self {
+        case .clarity: return "Raccoon_Lightbulb" // Example
+        case .creativity: return "Raccoon_Thinking" // Example
+        case .calm: return "Raccoon_Mood_Venting" // Placeholder, find a better "calm" raccoon
+        case .reflection: return "Raccoon_Planning" // Example
+        case .general: return nil
+        }
+    }
 } 

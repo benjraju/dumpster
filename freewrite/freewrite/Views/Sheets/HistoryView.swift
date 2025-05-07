@@ -22,7 +22,8 @@ struct HistoryView: View {
     
     // Keep Environment properties
     @Environment(\.dismiss) var dismiss
-    @Environment(\.colorScheme) var colorScheme // Add color scheme environment
+    // @Environment(\.colorScheme) var colorScheme // REMOVED
+    @AppStorage("colorScheme") private var colorSchemeString: String = "light" // ADDED
     @EnvironmentObject var viewModel: ContentViewModel // Use this for data
     
     // Keep state for selected date
@@ -58,7 +59,9 @@ struct HistoryView: View {
                 List {
                     Section(header: Text("Entries for \(selectedDateFormatted)")) {
                         ForEach(entriesForSelectedDate) { entry in
-                             EntryRowView(entry: entry, colorScheme: colorScheme)
+                             EntryRowView(entry: entry, colorSchemeString: colorSchemeString) // MODIFIED
+                                 .listRowSeparator(.hidden)
+                                 .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)) // Adjust padding around cards
                                  .onTapGesture {
                                      saveCurrentEntryAction()
                                      loadEntryAction(entry) // Select and load this entry
@@ -99,34 +102,42 @@ struct HistoryView: View {
                  .frame(maxHeight: .infinity) 
             }
         }
-        .background(BrandColors.background(for: colorScheme).ignoresSafeArea()) // Use dynamic background
+        .background(BrandColors.background(for: colorSchemeString).ignoresSafeArea()) // MODIFIED
         .navigationBarHidden(true) 
     }
     
     // Extracted Header View
     private var historyHeader: some View {
-         HStack {
-             Spacer()
-             Text("History")
-                 .font(Font.custom("Georgia-Bold", size: 28))
-                 .foregroundColor(BrandColors.primaryText(for: colorScheme)) // Use dynamic color
-             Spacer()
-             Button("Done") { dismiss() }
-                 .font(.headline)
-                 .foregroundColor(BrandColors.primaryText(for: colorScheme)) // Use dynamic color
+         ZStack {
+             // Centered Title
+             HStack {
+                 Spacer()
+                 Text("History")
+                     .font(Font.custom("Georgia-Bold", size: 28))
+                     .foregroundColor(BrandColors.primaryText(for: colorSchemeString)) // MODIFIED
+                 Spacer()
+             }
+
+             // Done button aligned to the right
+             HStack {
+                 Spacer() // Pushes button to the right
+                 Button("Done") { dismiss() }
+                     .font(.headline)
+                     .foregroundColor(BrandColors.primaryText(for: colorSchemeString)) // MODIFIED
+             }
          }
          .padding(.horizontal)
          .padding(.top, 15)
          .padding(.bottom, 10)
-         .background(BrandColors.background(for: colorScheme)) // Use dynamic background
+         .background(BrandColors.background(for: colorSchemeString)) // MODIFIED
     }
     
     // Extracted Stats View - Update Icons
     private var statsDisplay: some View {
         HStack {
-            StatView(value: "\(viewModel.currentStreak)", label: "Day Streak", iconName: "Raccoon_Streak_Flame", colorScheme: colorScheme) // Pass colorScheme
+            StatView(value: "\(viewModel.currentStreak)", label: "Day Streak", iconName: "Raccoon_Streak_Flame", colorSchemeString: colorSchemeString) // MODIFIED
             Spacer()
-            StatView(value: "\(viewModel.totalEntries)", label: "Total Dumps", iconName: "Raccoon_Entry_Toss", colorScheme: colorScheme) // Pass colorScheme
+            StatView(value: "\(viewModel.totalEntries)", label: "Total Dumps", iconName: "Raccoon_Entry_Toss", colorSchemeString: colorSchemeString) // MODIFIED
         }
         .padding(.horizontal, 30)
     }
@@ -159,25 +170,91 @@ struct DayView: View { ... }
 // Row View for displaying an entry in the list below calendar
 struct EntryRowView: View {
     let entry: HumanEntry
-    let colorScheme: ColorScheme // Add colorScheme parameter
+    let colorSchemeString: String // MODIFIED
     
+    @State private var loadedUIImage: UIImage? = nil // State for the loaded image
+    
+    private var hasPhotoFilename: Bool {
+        entry.photoFilename != nil && !(entry.photoFilename?.isEmpty ?? true)
+    }
+
+    private var isLightBasedTheme: Bool { // ADDED helper
+        return colorSchemeString == "light" || colorSchemeString == "sepia" || colorSchemeString == "dracula_lite"
+    }
+
     var body: some View {
-         VStack(alignment: .leading, spacing: 4) {
-             Text(entry.previewText.isEmpty ? "(Empty Entry)" : entry.previewText)
-                 .font(.headline)
-                 .foregroundColor(BrandColors.primaryText(for: colorScheme)) // Use dynamic color
-                 .lineLimit(1)
-             HStack {
-                 Text(entry.mood.icon)
-                 Text(entry.date)
-                    .font(.subheadline)
-                    .foregroundColor(BrandColors.secondaryText(for: colorScheme)) // Use dynamic color
-             }
-         }
-         .padding(.vertical, 8)
-         // Add background to row?
-         // .background(BrandColors.mintGreen.opacity(0.3))
-         // .cornerRadius(8)
+        HStack(spacing: 12) {
+            // Image Display Area
+            ZStack {
+                if let uiImage = loadedUIImage {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 60, height: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else if hasPhotoFilename {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(BrandColors.secondaryBackground(for: colorSchemeString).opacity(0.5)) // MODIFIED
+                    Image(systemName: "photo.on.rectangle.angled") // Placeholder icon
+                        .font(.title2)
+                        .foregroundColor(BrandColors.secondaryText(for: colorSchemeString)) // MODIFIED
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.clear) 
+                }
+            }
+            .frame(width: 60, height: 60)
+            
+            VStack(alignment: .leading, spacing: 5) {
+                Text(entry.previewText.isEmpty ? "(Empty Entry)" : entry.previewText)
+                    .font(.headline)
+                    .foregroundColor(BrandColors.primaryText(for: colorSchemeString)) // MODIFIED
+                    .lineLimit(2)
+                
+                HStack {
+                    Image(entry.mood.illustrationName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20) // Consider adjusting size
+                    Text(entry.date)
+                        .font(.subheadline)
+                        .foregroundColor(BrandColors.secondaryText(for: colorSchemeString)) // MODIFIED
+                    Spacer() // Add Spacer to push heart to the right
+                    if entry.isFavorite {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(BrandColors.accentPink) // Use a brand color for the heart
+                            .font(.subheadline) // Match the font style of the date
+                    }
+                }
+            }
+            Spacer() 
+        }
+        .padding(12)
+        .background(BrandColors.secondaryBackground(for: colorSchemeString).opacity(isLightBasedTheme ? 0.3 : 0.2)) // MODIFIED
+        .cornerRadius(10)
+        .onAppear(perform: loadImage)
+        // Optional shadow (uncomment to use)
+        // .shadow(color: BrandColors.defaultDarkBrown.opacity(0.1), radius: 3, x: 0, y: 2) // MODIFIED if uncommented
+    }
+    
+    private func loadImage() {
+        guard let filename = entry.photoFilename, !filename.isEmpty else { return }
+        
+        // Construct the path to the image in the app's documents directory
+        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let freewriteDirectory = documentsDirectory.appendingPathComponent("Freewrite")
+        let fileURL = freewriteDirectory.appendingPathComponent(filename)
+        
+        // Load the image data
+        // Doing this on a background thread to avoid blocking UI, then update state on main
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let imageData = try? Data(contentsOf: fileURL),
+               let uiImage = UIImage(data: imageData) {
+                DispatchQueue.main.async {
+                    self.loadedUIImage = uiImage
+                }
+            }
+        }
     }
 }
 
@@ -186,7 +263,7 @@ struct StatView: View {
     let value: String
     let label: String
     let iconName: String
-    let colorScheme: ColorScheme // Add colorScheme parameter
+    let colorSchemeString: String // MODIFIED
 
     var body: some View {
         HStack(spacing: 8) { // Added spacing
@@ -195,14 +272,14 @@ struct StatView: View {
                 .scaledToFit()
                 .frame(width: 30, height: 30) // Adjust size
                 // .font(.title2) // Remove font modifier
-                // .foregroundColor(BrandColors.darkBrown.opacity(0.8))
+                // .foregroundColor(BrandColors.defaultDarkBrown.opacity(0.8)) // MODIFIED if uncommented
             VStack(alignment: .leading) {
                 Text(value)
                     .font(Font.custom("Georgia-Bold", size: 20))
-                    .foregroundColor(BrandColors.primaryText(for: colorScheme)) // Use dynamic color
+                    .foregroundColor(BrandColors.primaryText(for: colorSchemeString)) // MODIFIED
                 Text(label)
                     .font(.caption)
-                    .foregroundColor(BrandColors.secondaryText(for: colorScheme)) // Use dynamic color
+                    .foregroundColor(BrandColors.secondaryText(for: colorSchemeString)) // MODIFIED
             }
         }
     }
